@@ -56,10 +56,10 @@ async def start_handler(message: Message) -> None:
         return
     await message.answer(
         "🟢 TelegramArchive is running.\n\n"
-        "Add the bot to an authorized group/channel. New messages that Telegram "
-        "delivers to the bot will be forwarded to the configured admin chat.\n\n"
+        "The bot forwards new messages that Telegram delivers to it from "
+        "authorized groups and channel posts to the configured admin chat.\n\n"
         "/id — show your Telegram ID\n"
-        "/status — show bot status"
+        "/status — check bot configuration"
     )
 
 
@@ -78,24 +78,30 @@ async def status_handler(message: Message) -> None:
         f"🟢 @{me.username or me.first_name}\n"
         f"Bot ID: {me.id}\n"
         f"Admin chat: {ADMIN_CHAT_ID}\n"
+        f"Admin IDs configured: {'yes' if ADMIN_IDS else 'no'}\n"
         "Polling: active"
     )
 
 
 async def forward_message(message: Message) -> None:
+    # Forward exactly the update Telegram delivered to the bot. The bot does
+    # not attempt to fetch or bypass messages that Telegram did not deliver.
     try:
         await message.forward(chat_id=ADMIN_CHAT_ID)
         logger.info(
-            "Forwarded chat=%s message=%s to admin_chat=%s",
+            "Forwarded chat=%s type=%s message=%s to admin_chat=%s",
             message.chat.id,
+            message.chat.type,
             message.message_id,
             ADMIN_CHAT_ID,
         )
-    except Exception:
-        logger.exception(
-            "Unable to forward chat=%s message=%s",
+    except Exception as exc:
+        logger.error(
+            "Forward failed: chat=%s type=%s message=%s error=%s",
             message.chat.id,
+            message.chat.type,
             message.message_id,
+            exc,
         )
 
 
@@ -108,8 +114,11 @@ async def channel_post_handler(message: Message) -> None:
 async def group_message_handler(message: Message) -> None:
     if message.chat.type not in {"group", "supergroup"}:
         return
+
+    # Do not treat bot commands as research messages.
     if message.text and message.text.startswith("/"):
         return
+
     await forward_message(message)
 
 
@@ -119,6 +128,7 @@ async def main() -> None:
     logger.info("Admin chat: %s", ADMIN_CHAT_ID)
     logger.info("Admin IDs: %s", sorted(ADMIN_IDS) if ADMIN_IDS else "unrestricted")
 
+    # Polling requires no public web server. Remove an old webhook if present.
     await bot.delete_webhook(drop_pending_updates=False)
 
     try:
